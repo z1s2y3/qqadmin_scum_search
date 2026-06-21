@@ -1,6 +1,0 @@
-name: qqadmin_scum_search
-display_name: SCUM物品查询
-desc: 查询SCUM游戏物品代码，支持模糊搜索和官方中文名称，包含2247个物品
-version: v1.0.0
-author: qqadmin
-repo: https://github.com/qqadmin/scum_search
