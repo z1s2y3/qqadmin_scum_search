@@ -1,12 +1,13 @@
 """
 SCUM物品代码查询插件 - AstrBot版本
-支持模糊搜索和官方中文名称
-数据来源: SCUM全物品代码大全_豆包AI生成.xlsx
+支持模糊搜索物品名、中文名称、分类
+数据来源: scum.xlsx
 """
 
-import openpyxl
 import os
 from typing import List, Dict
+
+import openpyxl
 from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Star, register
 from astrbot.api import logger
@@ -14,447 +15,325 @@ from astrbot.api import logger
 SCUM_ITEMS: List[Dict[str, str]] = []
 MAIN_CATEGORIES: List[str] = []
 SUB_CATEGORIES: Dict[str, List[str]] = {}
+MAIN_CATEGORY_COUNTS: Dict[str, int] = {}
+SUB_CATEGORY_COUNTS: Dict[str, Dict[str, int]] = {}
 
-OFFICIAL_NAMES = {
-    "简易手推车": "简易手推车",
-    "金属手推车": "金属手推车",
-    "巴巴摩托": "巴巴摩托",
-    "AK47突击步枪": "AK-47",
-    "AKM突击步枪": "AKM",
-    "M4A1突击步枪": "M4A1",
-    "M16A4突击步枪": "M16A4",
-    "SCAR-H突击步枪": "SCAR-H",
-    "格洛克17": "Glock 17",
-    "格洛克21": "Glock 21",
-    "沙漠之鹰": "Desert Eagle",
-    "M9手枪": "M9",
-    "1911手枪": "M1911",
-    "左轮手枪": "Revolver",
-    "莫辛纳甘": "Mosin-Nagant",
-    "SKS步枪": "SKS",
-    "SV98狙击枪": "SV-98",
-    "VSS狙击枪": "VSS",
-    "AWP狙击枪": "AWP",
-    "M24狙击枪": "M24",
-    "MP5冲锋枪": "MP5",
-    "UMP45冲锋枪": "UMP45",
-    "P90冲锋枪": "P90",
-    "MAC10冲锋枪": "MAC-10",
-    "Vector冲锋枪": "Vector",
-    "PPSh41冲锋枪": "PPSh-41",
-    "M249轻机枪": "M249",
-    "PKM机枪": "PKM",
-    "RPK机枪": "RPK",
-    "M870霰弹枪": "M870",
-    "SPAS12霰弹枪": "SPAS-12",
-    "复合弓": "Compound Bow",
-    "十字弩": "Crossbow",
-    "砍刀": "Machete",
-    "战术小刀": "Tactical Knife",
-    "撬棍": "Crowbar",
-    "棒球棒": "Baseball Bat",
-    "工兵铲": "Shovel",
-    "Weapon_AK47": "AK-47突击步枪",
-    "Weapon_AKM": "AKM突击步枪",
-    "Weapon_M4A1": "M4A1突击步枪",
-    "Weapon_M16A4": "M16A4突击步枪",
-    "Weapon_SCAR_H": "SCAR-H突击步枪",
-    "Weapon_Glock17": "格洛克17手枪",
-    "Weapon_Glock21": "格洛克21手枪",
-    "Weapon_DesertEagle": "沙漠之鹰手枪",
-    "Weapon_M9": "M9手枪",
-    "Weapon_1911": "M1911手枪",
-    "Weapon_Revolver": "左轮手枪",
-    "Weapon_MosinNagant": "莫辛纳甘步枪",
-    "Weapon_SKS": "SKS步枪",
-    "Weapon_SV98": "SV-98狙击枪",
-    "Weapon_VSS": "VSS狙击枪",
-    "Weapon_AWP": "AWP狙击枪",
-    "Weapon_M24": "M24狙击枪",
-    "Weapon_MP5": "MP5冲锋枪",
-    "Weapon_UMP45": "UMP45冲锋枪",
-    "Weapon_P90": "P90冲锋枪",
-    "Weapon_MAC10": "MAC-10冲锋枪",
-    "Weapon_Vector": "Vector冲锋枪",
-    "Weapon_PPSh41": "PPSh-41冲锋枪",
-    "Weapon_M249": "M249轻机枪",
-    "Weapon_PKM": "PKM机枪",
-    "Weapon_RPK": "RPK机枪",
-    "Weapon_M870": "M870霰弹枪",
-    "Weapon_SPAS12": "SPAS-12霰弹枪",
-    "Weapon_Machete": "砍刀",
-    "Weapon_Knife": "战术小刀",
-    "Weapon_Crowbar": "撬棍",
-    "Weapon_BaseballBat": "棒球棒",
-    "Weapon_Shovel": "工兵铲",
-    "Magazine_AK47": "AK47弹夹",
-    "Magazine_M4A1": "M4A1弹夹",
-    "Magazine_M16A4": "M16A4弹夹",
-    "ScopeRail_AK47": "AK47导轨",
-    "Weapon_Parts_AK47": "AK47零件",
-    "Weapon_AK47_Engraved": "刻字AK-47",
+DEFAULT_EXCEL = "scum.xlsx"
+DEFAULT_MAX_RESULTS = 10
+SEPARATOR = "──────────────────────────────────────────"
+HEADER_LINE = "══════════════════════════════════════════"
+
+CATEGORY_ICONS = {
+    "载具": "🚗",
+    "丧尸": "🧟",
 }
 
-def load_items(excel_path=None):
+SUBCATEGORY_ICONS = {
+    "武器": "🔫",
+    "近战": "🔫",
+    "弹药": "💣",
+    "食物": "🍖",
+    "医疗": "💊",
+}
+
+
+def _get_category_icon(main_cat: str, sub_cat: str) -> str:
+    if main_cat in CATEGORY_ICONS:
+        return CATEGORY_ICONS[main_cat]
+    for key, icon in SUBCATEGORY_ICONS.items():
+        if key in sub_cat:
+            return icon
+    if "工具" in main_cat:
+        return "🔧"
+    return "📦"
+
+
+def _safe_str(value) -> str:
+    return str(value).strip() if value else ""
+
+
+def load_items(excel_path: str = None) -> None:
     if excel_path is None:
-        excel_path = os.path.join(os.path.dirname(__file__), "SCUM_CN.xlsx")
+        excel_path = os.path.join(os.path.dirname(__file__), DEFAULT_EXCEL)
     else:
         excel_path = os.path.join(os.path.dirname(__file__), excel_path)
-    
-    print(f"[SCUM插件] 尝试加载Excel: {excel_path}")
-    
+
+    logger.info(f"[SCUM插件] 尝试加载Excel: {excel_path}")
+
     if not os.path.exists(excel_path):
-        logger.error(f"Excel文件不存在: {excel_path}")
-        print(f"[SCUM插件] 错误：Excel文件不存在!")
+        logger.error(f"[SCUM插件] Excel文件不存在: {excel_path}")
         return
-    
+
+    SCUM_ITEMS.clear()
+    MAIN_CATEGORIES.clear()
+    SUB_CATEGORIES.clear()
+    MAIN_CATEGORY_COUNTS.clear()
+    SUB_CATEGORY_COUNTS.clear()
+
     try:
-        print(f"[SCUM插件] 正在打开Excel文件...")
         wb = openpyxl.load_workbook(excel_path)
         sheet = wb.active
-        print(f"[SCUM插件] Excel文件已打开，共 {sheet.max_row} 行")
-        
-        headers = [sheet.cell(row=1, column=i).value for i in range(1, 4)]
-        logger.info(f"Excel表头: {headers}")
-        print(f"[SCUM插件] 表头: {headers}")
-        
+        logger.info(f"[SCUM插件] Excel文件已打开，共 {sheet.max_row} 行")
+
+        headers = [sheet.cell(row=1, column=i).value for i in range(1, sheet.max_column + 1)]
+        logger.info(f"[SCUM插件] 表头: {headers}")
+
         for row in range(2, sheet.max_row + 1):
             try:
-                name = sheet.cell(row=row, column=1).value or ""
-                code = sheet.cell(row=row, column=2).value or ""
-                spawn_cmd = sheet.cell(row=row, column=3).value or ""
-                
+                code = _safe_str(sheet.cell(row=row, column=1).value)
+                name = _safe_str(sheet.cell(row=row, column=2).value)
+                spawn_cmd = _safe_str(sheet.cell(row=row, column=3).value)
+                main_cat = _safe_str(sheet.cell(row=row, column=4).value)
+                sub_cat = _safe_str(sheet.cell(row=row, column=5).value)
+
                 if not code:
                     continue
-                
-                main_cat = "物品"
-                sub_cat = ""
-                
-                if "Vehicle" in code or "Car" in code or "Truck" in code or "Boat" in code or "Bike" in code:
-                    main_cat = "载具"
-                    sub_cat = "载具"
-                elif "Zombie" in code:
-                    main_cat = "丧尸"
-                    sub_cat = "丧尸"
-                elif "Weapon_" in code:
-                    main_cat = "物品"
-                    sub_cat = "武器"
-                elif "Magazine_" in code:
-                    main_cat = "物品"
-                    sub_cat = "弹药"
-                elif "Ammo" in code or "Cal_" in code or "Gauge" in code:
-                    main_cat = "物品"
-                    sub_cat = "弹药"
-                elif "Armor" in code or "Cloth" in code or "Shirt" in code or "Pants" in code or "Boots" in code:
-                    main_cat = "物品"
-                    sub_cat = "护甲"
-                elif "Food" in code or "Water" in code or "Drink" in code:
-                    main_cat = "物品"
-                    sub_cat = "食物"
-                elif "Med" in code or "Heal" in code or "Bandage" in code or "Syringe" in code:
-                    main_cat = "物品"
-                    sub_cat = "医疗"
-                elif "Tool" in code or "Part" in code or "Component" in code:
-                    main_cat = "物品"
-                    sub_cat = "工具"
-                elif "Build" in code or "Structure" in code or "Fence" in code or "Wall" in code:
-                    main_cat = "物品"
-                    sub_cat = "建家"
-                else:
-                    main_cat = "物品"
-                    sub_cat = "其他"
-                
-                SCUM_ITEMS.append({
-                    "main_category": main_cat.strip(),
-                    "sub_category": sub_cat.strip(),
-                    "code": code.strip(),
-                    "name": name.strip() if name else "",
-                    "spawn_cmd": spawn_cmd.strip() if spawn_cmd else ""
-                })
-                
-                if main_cat and main_cat.strip() not in MAIN_CATEGORIES:
-                    MAIN_CATEGORIES.append(main_cat.strip())
-                
-                if main_cat and sub_cat:
-                    main_key = main_cat.strip()
-                    sub_key = sub_cat.strip()
-                    if main_key not in SUB_CATEGORIES:
-                        SUB_CATEGORIES[main_key] = []
-                    if sub_key not in SUB_CATEGORIES[main_key]:
-                        SUB_CATEGORIES[main_key].append(sub_key)
+
+                main_cat = main_cat or "物品"
+                sub_cat = sub_cat or "其他"
+
+                item = {
+                    "main_category": main_cat,
+                    "sub_category": sub_cat,
+                    "code": code,
+                    "name": name,
+                    "spawn_cmd": spawn_cmd,
+                }
+                SCUM_ITEMS.append(item)
+
+                if main_cat not in MAIN_CATEGORIES:
+                    MAIN_CATEGORIES.append(main_cat)
+                    MAIN_CATEGORY_COUNTS[main_cat] = 0
+                MAIN_CATEGORY_COUNTS[main_cat] += 1
+
+                if main_cat not in SUB_CATEGORIES:
+                    SUB_CATEGORIES[main_cat] = []
+                    SUB_CATEGORY_COUNTS[main_cat] = {}
+                if sub_cat not in SUB_CATEGORIES[main_cat]:
+                    SUB_CATEGORIES[main_cat].append(sub_cat)
+                    SUB_CATEGORY_COUNTS[main_cat][sub_cat] = 0
+                SUB_CATEGORY_COUNTS[main_cat][sub_cat] += 1
             except Exception as e:
-                logger.error(f"读取第{row}行失败: {e}")
-        
-        logger.info(f"已加载 {len(SCUM_ITEMS)} 个物品")
-        print(f"[SCUM插件] 已加载 {len(SCUM_ITEMS)} 个物品")
+                logger.error(f"[SCUM插件] 读取第{row}行失败: {e}")
+
+        logger.info(f"[SCUM插件] 已加载 {len(SCUM_ITEMS)} 个物品")
         if SCUM_ITEMS:
-            print(f"[SCUM插件] 示例数据: {SCUM_ITEMS[0]}")
+            logger.info(f"[SCUM插件] 示例数据: {SCUM_ITEMS[0]}")
     except Exception as e:
-        logger.error(f"加载Excel失败: {e}")
-        print(f"[SCUM插件] 加载Excel失败: {e}")
+        logger.error(f"[SCUM插件] 加载Excel失败: {e}")
         import traceback
-        traceback.print_exc()
+        logger.error(traceback.format_exc())
+
+
+def _calc_match_score(item: Dict[str, str], keyword: str) -> int:
+    name = item["name"].lower()
+    code = item["code"].lower()
+    main_cat = item["main_category"].lower()
+    sub_cat = item["sub_category"].lower()
+
+    if name == keyword or code == keyword:
+        return 100
+    if name.startswith(keyword) or code.startswith(keyword):
+        return 50
+    if keyword in name or keyword in code:
+        return 20
+    if sub_cat == keyword:
+        return 15
+    if main_cat == keyword:
+        return 10
+    if keyword in sub_cat:
+        return 8
+    if keyword in main_cat:
+        return 5
+    return 0
+
+
+def _item_matches_all(item: Dict[str, str], keywords: List[str]) -> int:
+    total_score = 0
+    for kw in keywords:
+        if not kw:
+            continue
+        score = _calc_match_score(item, kw)
+        if score == 0:
+            return 0
+        total_score += score
+    return total_score
+
 
 def fuzzy_search(keyword: str) -> List[Dict[str, str]]:
-    results = []
-    keyword = keyword.lower().strip()
-    
+    keyword = keyword.strip()
+    if not keyword:
+        return []
+
+    keywords = [kw.lower() for kw in keyword.split() if kw]
+
+    scored = []
     for item in SCUM_ITEMS:
-        name = item["name"].lower() if item["name"] else ""
-        code = item["code"].lower() if item["code"] else ""
-        sub_cat = item["sub_category"].lower() if item["sub_category"] else ""
-        
-        if keyword in name or keyword in code or keyword in sub_cat:
-            results.append(item)
-    
-    return sorted(results, key=lambda x: (len(x["name"]), x["name"]))
+        score = _item_matches_all(item, keywords)
+        if score > 0:
+            scored.append((score, item))
 
-def search_by_sub_category(sub_category: str) -> List[Dict[str, str]]:
-    results = []
-    sub_category = sub_category.lower().strip()
-    
-    for item in SCUM_ITEMS:
-        item_sub_cat = item["sub_category"].lower() if item["sub_category"] else ""
-        if sub_category == item_sub_cat:
-            results.append(item)
-    
-    return sorted(results, key=lambda x: x["name"] if x["name"] else x["code"])
+    scored.sort(key=lambda x: (-x[0], len(x[1]["name"]), x[1]["name"]))
+    return [item for _, item in scored]
 
-def get_category_items(main_category: str) -> List[Dict[str, str]]:
-    results = []
-    main_category = main_category.lower().strip()
-    
-    for item in SCUM_ITEMS:
-        item_main_cat = item["main_category"].lower() if item["main_category"] else ""
-        if main_category == item_main_cat:
-            results.append(item)
-    
-    return sorted(results, key=lambda x: (x["sub_category"], x["name"]))
 
-def get_official_name(name: str) -> str:
-    if not name:
-        return ""
-    
-    if name in OFFICIAL_NAMES:
-        return OFFICIAL_NAMES[name]
-    
-    for key, value in OFFICIAL_NAMES.items():
-        if key in name or name in key:
-            return value
-    return name
-
-# 模块加载时立即初始化数据
-print("[SCUM插件] 正在初始化...")
+logger.info("[SCUM插件] 正在初始化...")
 load_items()
-print(f"[SCUM插件] 初始化完成，共 {len(SCUM_ITEMS)} 个物品")
+logger.info(f"[SCUM插件] 初始化完成，共 {len(SCUM_ITEMS)} 个物品")
+
 
 @register("SCUM物品查询", "AstrBot", "查询SCUM游戏物品代码", "1.0.0")
 class ScumItemSearch(Star):
-    
     def __init__(self, context, config=None):
         super().__init__(context)
         self.config = config or {}
-    
+
     async def on_load(self):
         try:
-            logger.info("开始加载SCUM物品数据...")
-            excel_path = self.config.get('excel_path', None)
-            print(f"[SCUM插件] 从配置读取excel_path: {excel_path}")
+            logger.info("[SCUM插件] 开始加载SCUM物品数据...")
+            excel_path = self.config.get("excel_path", None)
+            logger.info(f"[SCUM插件] 从配置读取excel_path: {excel_path}")
             load_items(excel_path)
-            logger.info(f"SCUM物品加载完成，共 {len(SCUM_ITEMS)} 个物品")
+            logger.info(f"[SCUM插件] SCUM物品加载完成，共 {len(SCUM_ITEMS)} 个物品")
         except Exception as e:
-            logger.error(f"加载SCUM物品数据失败: {e}")
+            logger.error(f"[SCUM插件] 加载SCUM物品数据失败: {e}")
             import traceback
             logger.error(traceback.format_exc())
-    
-    def get_spawn_command(self, item):
-        # 优先使用Excel中的完整刷取指令
+
+    def _get_spawn_command(self, item: Dict[str, str]) -> str:
         if item.get("spawn_cmd"):
             return item["spawn_cmd"]
-        
-        # 如果没有则自动生成
-        main_cat = item["main_category"]
+        return f"#spawnitem {item['code']} 1"
+
+    def _format_item(self, item: Dict[str, str]) -> str:
+        name = item["name"]
         code = item["code"]
-        
-        if main_cat == "载具":
-            return f"#SpawnVehicle {code} 1"
-        elif main_cat == "丧尸":
-            return f"#SpawnZombie {code} 1"
-        elif "Magazine" in code or "Ammo" in code:
-            return f"#SpawnItem {code} 1 StackCount 100"
-        else:
-            return f"#SpawnItem {code} 1"
-    
-    def get_quantity_word(self, item):
         main_cat = item["main_category"]
         sub_cat = item["sub_category"]
-        
-        if main_cat == "载具":
-            return "辆"
-        elif sub_cat in ["武器", "单手近战", "双手近战"]:
-            return "把"
-        elif sub_cat in ["护甲", "服装", "饰品"]:
-            return "件"
-        elif sub_cat in ["弹药"]:
-            return "发"
-        elif sub_cat in ["食物", "饮料", "药品"]:
-            return "个"
-        else:
-            return "个"
-    
-    @filter.command("scum")
-    async def scum_search(self, event: AstrMessageEvent):
-        args = event.message_str.strip().split()
-        if len(args) < 2:
-            await self.scum_help(event)
-            return
-        
-        keyword = args[1]
-        page = 1
-        
-        if len(args) >= 3 and args[2].isdigit():
-            page = int(args[2])
-        
-        results = fuzzy_search(keyword)
-        
-        if not results:
-            response = f"❌ 未找到「{keyword}」相关物品"
-            yield event.plain_result(response)
-            return
-        
-        max_results = self.config.get('max_results', 10)
-        print(f"[SCUM插件] 当前max_results配置: {max_results}")
-        
-        total_pages = (len(results) + max_results - 1) // max_results
-        start_idx = (page - 1) * max_results
-        end_idx = start_idx + max_results
-        
-        page_results = results[start_idx:end_idx]
-        
-        if page > total_pages:
-            response = f"❌ 没有第 {page} 页，共 {total_pages} 页"
-            yield event.plain_result(response)
-            return
-        
-        response = "══════════════════════════════════════════\n"
-        
-        for item in page_results:
-            name = item["name"]
-            official_name = get_official_name(name)
-            code = item["code"]
-            main_cat = item["main_category"]
-            
-            if official_name:
-                display_name = official_name
-            else:
-                display_name = name if name else code
-            
-            cat_icon = "📦"
-            if main_cat == "载具":
-                cat_icon = "🚗"
-            elif main_cat == "丧尸":
-                cat_icon = "🧟"
-            elif "武器" in item["sub_category"] or "近战" in item["sub_category"]:
-                cat_icon = "🔫"
-            elif "弹药" in item["sub_category"]:
-                cat_icon = "💣"
-            
-            response += f"{cat_icon} 【{display_name}】\n"
-            response += f"   └─ {main_cat} > {item['sub_category']}\n"
-            response += f"   ├─ 物品代码: {code}\n"
-            response += f"   └─ 游戏代码: 🎮 #SpawnItem {code} 1\n"
-            
-            if "Magazine" in code or "Ammo" in code:
-                response += f"   └─ 满弹夹: 🎮 #SpawnItem {code} 1 StackCount 100\n"
-            
-            response += "──────────────────────────────────────────\n"
-        
+        spawn_cmd = self._get_spawn_command(item)
+        display_name = name if name else code
+        cat_icon = _get_category_icon(main_cat, sub_cat)
+
+        return (
+            f"{cat_icon} 【{display_name}】\n"
+            f"   └─ {main_cat} > {sub_cat}\n"
+            f"   ├─ 物品代码: {code}\n"
+            f"   └─ 刷取指令: 🎮 {spawn_cmd}\n"
+            f"{SEPARATOR}\n"
+        )
+
+    def _build_pagination_info(self, keyword: str, page: int, total_pages: int, total: int, cmd: str = "物品查询") -> str:
+        info = f"📊 共找到 {total} 个结果"
         if total_pages > 1:
-            response += f"📄 第 {page}/{total_pages} 页"
+            info += f" | 📄 第 {page}/{total_pages} 页"
             if page < total_pages:
-                response += f" | 输入 /scum {keyword} {page + 1} 查看下一页"
-            else:
-                response += " | 已是最后一页"
-        
-        yield event.plain_result(response)
-    
-    @filter.command("scum分类")
-    async def scum_categories(self, event: AstrMessageEvent):
-        response = "📦 SCUM物品分类\n\n"
-        
+                info += f"\n💡 输入 /{cmd} {keyword} {page + 1} 查看下一页"
+        return info
+
+    def _build_category_list(self) -> str:
+        response = "📦 物品分类列表\n\n"
         for main_cat in MAIN_CATEGORIES:
-            response += f"• {main_cat}\n"
+            count = MAIN_CATEGORY_COUNTS.get(main_cat, 0)
+            response += f"【{main_cat}】({count}个)\n"
             if main_cat in SUB_CATEGORIES:
                 for sub_cat in SUB_CATEGORIES[main_cat]:
-                    response += f"  └─ {sub_cat}\n"
-        
-        response += f"\n💡 使用: /scum子分类 <子分类名称>\n示例: /scum子分类 武器"
-        yield event.plain_result(response)
-    
-    @filter.command("scum子分类")
-    async def scum_sub_category(self, event: AstrMessageEvent):
+                    sub_count = SUB_CATEGORY_COUNTS.get(main_cat, {}).get(sub_cat, 0)
+                    response += f"  └─ {sub_cat} ({sub_count}个)\n"
+            response += "\n"
+        response += "💡 使用: /物品分类 <大分类名> 查看该分类下的所有物品\n"
+        response += "示例: /物品分类 工具"
+        return response
+
+    def _get_category_items(self, category: str) -> List[Dict[str, str]]:
+        category_lower = category.lower().strip()
+        results = []
+        for item in SCUM_ITEMS:
+            if item["main_category"].lower() == category_lower:
+                results.append(item)
+        return sorted(results, key=lambda x: (x["sub_category"], x["name"]))
+
+    @filter.command("物品分类")
+    async def category_search(self, event: AstrMessageEvent):
         args = event.message_str.strip().split()
         if len(args) < 2:
-            response = "❌ 请指定子分类名称\n\n💡 使用: /scum子分类 <名称>\n示例: /scum子分类 武器"
-            yield event.plain_result(response)
+            yield event.plain_result(self._build_category_list())
             return
-        
-        sub_category = ' '.join(args[1:])
-        items = search_by_sub_category(sub_category)
-        
+
+        category = " ".join(args[1:])
+        page = 1
+
+        if len(args) >= 3 and args[-1].isdigit():
+            page = int(args[-1])
+            category = " ".join(args[1:-1])
+
+        items = self._get_category_items(category)
+
         if not items:
-            response = f"❌ 未找到「{sub_category}」子分类"
+            yield event.plain_result(f"❌ 未找到「{category}」分类")
+            return
+
+        max_results = self.config.get("max_results", DEFAULT_MAX_RESULTS)
+        total_pages = (len(items) + max_results - 1) // max_results
+
+        if page > total_pages:
+            yield event.plain_result(f"❌ 没有第 {page} 页，共 {total_pages} 页")
+            return
+
+        start_idx = (page - 1) * max_results
+        end_idx = start_idx + max_results
+        page_items = items[start_idx:end_idx]
+
+        response = f"📦 {category} 分类物品\n"
+        response += f"{HEADER_LINE}\n"
+        for item in page_items:
+            response += self._format_item(item)
+
+        response += self._build_pagination_info(category, page, total_pages, len(items), "物品分类")
+        yield event.plain_result(response)
+
+    @filter.command("物品查询")
+    async def item_search(self, event: AstrMessageEvent):
+        args = event.message_str.strip().split()
+        if len(args) < 2:
+            response = (
+                "❌ 请输入搜索关键词\n\n"
+                "💡 使用: /物品查询 <关键词>\n"
+                "示例: /物品查询 ak47\n\n"
+                "支持搜索: 物品名、中文名称、分类"
+            )
             yield event.plain_result(response)
             return
-        
-        response = f"📦 {sub_category} ({len(items)}个):\n\n"
-        for i, item in enumerate(items[:10], 1):
-            name = item["name"]
-            official_name = get_official_name(name)
-            if official_name != name and official_name:
-                display_name = f"{name} ({official_name})"
-            else:
-                display_name = name if name else item["code"]
-            
-            response += f"{i}. {display_name} - {item['code']}\n"
-        
-        if len(items) > 10:
-            response += f"\n💡 还有 {len(items) - 10} 个物品，使用 /scum <关键词> 搜索"
-        
+
+        keyword = " ".join(args[1:])
+        page = 1
+
+        if len(args) >= 3 and args[-1].isdigit():
+            page = int(args[-1])
+            keyword = " ".join(args[1:-1])
+
+        results = fuzzy_search(keyword)
+
+        if not results:
+            yield event.plain_result(f"❌ 未找到「{keyword}」相关物品")
+            return
+
+        max_results = self.config.get("max_results", DEFAULT_MAX_RESULTS)
+        total_pages = (len(results) + max_results - 1) // max_results
+
+        if page > total_pages:
+            yield event.plain_result(f"❌ 没有第 {page} 页，共 {total_pages} 页")
+            return
+
+        start_idx = (page - 1) * max_results
+        end_idx = start_idx + max_results
+        page_results = results[start_idx:end_idx]
+
+        response = f"{HEADER_LINE}\n"
+        for item in page_results:
+            response += self._format_item(item)
+
+        response += self._build_pagination_info(keyword, page, total_pages, len(results))
         yield event.plain_result(response)
-    
-    @filter.command("scum帮助")
-    async def scum_help(self, event: AstrMessageEvent):
-        response = """🎮 SCUM物品查询
-        
-📌 命令:
-├─ /scum <关键词> - 模糊搜索物品
-├─ /scum分类 - 查看所有分类
-├─ /scum子分类 <名称> - 按子分类查询
-└─ /scum帮助 - 显示此帮助
 
-🎯 使用示例:
-/scum ak47         # 搜索AK-47
-/scum 凤凰针       # 搜索凤凰针
-/scum 巴雷特礼盒   # 搜索巴雷特礼盒
-/scum 刀           # 模糊搜索所有刀类
-/scum子分类 武器    # 查看武器分类
-
-💡 模糊搜索支持:
-- 物品名称（如"凤凰针"、"AK47"）
-- 物品代码（如"BP_AK47"）
-- 分类名称（如"武器"、"医疗"）
-
-🎮 游戏内使用:
-在游戏控制台输入 #SpawnItem <代码>
-例如: #SpawnItem BP_AK47
-
-📦 数据统计:
-- 总物品数: 2247个
-- 大分类: 物品、载具
-- 子分类: 16个"""
-        
-        yield event.plain_result(response)
-    
     async def terminate(self):
-        logger.info("SCUM物品查询插件已卸载")
+        logger.info("[SCUM插件] SCUM物品查询插件已卸载")
