@@ -205,6 +205,9 @@ class ScumItemSearch(Star):
             return item["spawn_cmd"]
         return f"#spawnitem {item['code']} 1"
 
+    def _get_full_magazine_cmd(self, spawn_cmd: str) -> str:
+        return f"{spawn_cmd} StackCount 100"
+
     def _format_item(self, item: Dict[str, str]) -> str:
         name = item["name"]
         code = item["code"]
@@ -214,13 +217,19 @@ class ScumItemSearch(Star):
         display_name = name if name else code
         cat_icon = _get_category_icon(main_cat, sub_cat)
 
-        return (
+        result = (
             f"{cat_icon} 【{display_name}】\n"
             f"   └─ {main_cat} > {sub_cat}\n"
             f"   ├─ 物品代码: {code}\n"
-            f"   └─ 刷取指令: 🎮 {spawn_cmd}\n"
-            f"{SEPARATOR}\n"
+            f"   ├─ 刷取指令: 🎮 {spawn_cmd}\n"
         )
+
+        if sub_cat == "弹夹" or sub_cat == "弹匣":
+            full_cmd = self._get_full_magazine_cmd(spawn_cmd)
+            result += f"   ├─ 满弹夹指令: 🎮 {full_cmd}\n"
+
+        result += f"{SEPARATOR}\n"
+        return result
 
     def _build_pagination_info(self, keyword: str, page: int, total_pages: int, total: int, cmd: str = "物品查询") -> str:
         info = f"📊 共找到 {total} 个结果"
